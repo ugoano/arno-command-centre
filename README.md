@@ -30,6 +30,7 @@ Built on top of real infrastructure used daily — 11 MCP servers, 3 months of p
 ```bash
 npm install
 npm run dev          # DevTools at localhost:3000
+npm test             # Run 45 unit tests
 ```
 
 Connect to Claude Web: Settings → Connectors → Add custom connector → `[your-url]/mcp`
@@ -56,11 +57,24 @@ Connect to Claude Web: Settings → Connectors → Add custom connector → `[yo
 | `complete-task` | Mark a task as done | Confirmation badge |
 | `add-task` | Create a new task | Confirmation badge |
 
+## Testing
+
+45 tests across 4 files using Vitest + React Testing Library:
+
+```bash
+npm test             # Run all tests
+npm run test:watch   # Watch mode for TDD
+```
+
+- Server handler tests — Trello JSON-RPC integration, all 3 widget handlers
+- Widget component tests — Rendering, user interactions, data-llm annotations, error states
+
 ## Tech Stack
 
 - **Framework:** [Skybridge](https://docs.skybridge.tech) (TypeScript, MCP + React widgets)
 - **Backend:** Trello MCP server (card CRUD, list management)
 - **Frontend:** React 19, Vite 7, custom dark theme
+- **Testing:** Vitest, React Testing Library, jsdom
 - **Protocol:** Model Context Protocol (MCP)
 
 ## Deploy
