@@ -1,11 +1,16 @@
 import { McpServer } from "skybridge/server";
 import { z } from "zod";
 
-// --- Trello API helpers ---
+// --- MCP API helpers ---
 const TRELLO_MCP = process.env.TRELLO_MCP_URL || "http://134.209.178.194:8001";
+const GCAL_MCP = process.env.GCAL_MCP_URL || "http://134.209.178.194:8006";
 const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
 
-async function callTrello(tool: string, args: Record<string, unknown>) {
+async function callMcp(
+  baseUrl: string,
+  tool: string,
+  args: Record<string, unknown>
+) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -13,7 +18,7 @@ async function callTrello(tool: string, args: Record<string, unknown>) {
     headers["Authorization"] = `Bearer ${MCP_AUTH_TOKEN}`;
   }
 
-  const res = await fetch(`${TRELLO_MCP}/mcp`, {
+  const res = await fetch(`${baseUrl}/mcp`, {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -30,6 +35,14 @@ async function callTrello(tool: string, args: Record<string, unknown>) {
     (c: { type: string }) => c.type === "text"
   );
   return textContent ? JSON.parse(textContent.text) : data.result;
+}
+
+async function callTrello(tool: string, args: Record<string, unknown>) {
+  return callMcp(TRELLO_MCP, tool, args);
+}
+
+async function callGcal(tool: string, args: Record<string, unknown>) {
+  return callMcp(GCAL_MCP, tool, args);
 }
 
 async function getTasks(list: string = "todo_today") {
@@ -52,6 +65,20 @@ async function createTask(name: string, description?: string) {
     board: "bankai",
   });
 }
+
+async function getEvents(days: number = 1) {
+  return callGcal("list_events", { days });
+}
+
+type CalEvent = {
+  id: string;
+  summary: string;
+  start: { dateTime?: string; date?: string };
+  end: { dateTime?: string; date?: string };
+  location?: string;
+  organizer?: { email: string };
+  colorId?: string;
+};
 
 // --- Server ---
 const server = new McpServer(
@@ -227,6 +254,164 @@ const server = new McpServer(
           structuredContent: { success: false, error: String(error) },
           content: [
             { type: "text" as const, text: `Error creating task: ${error}` },
+          ],
+          isError: true,
+        };
+      }
+    }
+  )
+
+  // --- Widget: Calendar Panel ---
+  .registerWidget(
+    "show-calendar",
+    {
+      description: "Arno Command Centre — Calendar Panel",
+    },
+    {
+      description:
+        "Display today's calendar events in a timeline view. Call this when the user wants to see their schedule, check meetings, or view their calendar.",
+      inputSchema: {
+        days: z
+          .number()
+          .optional()
+          .default(1)
+          .describe("Number of days to show (default: 1)"),
+      },
+      _meta: {
+        "openai/widgetAccessible": true,
+      },
+    },
+    async ({ days }) => {
+      try {
+        const rawEvents = await getEvents(days);
+        const events = (Array.isArray(rawEvents) ? rawEvents : []).map(
+          (evt: CalEvent) => ({
+            title: evt.summary || "Untitled",
+            start: evt.start?.dateTime || evt.start?.date || "",
+            end: evt.end?.dateTime || evt.end?.date || "",
+            location: evt.location || "",
+            isAllDay: !evt.start?.dateTime,
+          })
+        );
+
+        const structuredContent = {
+          events,
+          date: new Date().toISOString().split("T")[0],
+          total: events.length,
+        };
+
+        return {
+          structuredContent,
+          content: [
+            {
+              type: "text" as const,
+              text: `Calendar: ${events.length} events today. ${events.map((e: { title: string }) => e.title).join(", ")}`,
+            },
+          ],
+          isError: false,
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error fetching calendar: ${error}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+  )
+
+  // --- Widget: Quick Stats Bar ---
+  .registerWidget(
+    "show-quick-stats",
+    {
+      description: "Arno Command Centre — Quick Stats",
+    },
+    {
+      description:
+        "Display a compact stats bar with task count, overdue count, meetings today, next meeting, and free time. Call this for a quick daily overview.",
+      inputSchema: {},
+      _meta: {
+        "openai/widgetAccessible": true,
+      },
+    },
+    async () => {
+      try {
+        const [cards, rawEvents] = await Promise.all([
+          getTasks("todo_today"),
+          getEvents(1),
+        ]);
+
+        const tasks = Array.isArray(cards) ? cards : [];
+        const events = (
+          Array.isArray(rawEvents) ? rawEvents : []
+        ) as CalEvent[];
+
+        const taskCount = tasks.length;
+        const overdueCount = tasks.filter(
+          (t: { due: string | null }) =>
+            t.due && new Date(t.due) < new Date()
+        ).length;
+        const meetingsToday = events.length;
+
+        // Find next upcoming meeting (non-all-day, in the future)
+        const now = new Date();
+        const upcoming = events
+          .filter(
+            (e) => e.start?.dateTime && new Date(e.start.dateTime) > now
+          )
+          .sort(
+            (a, b) =>
+              new Date(a.start.dateTime!).getTime() -
+              new Date(b.start.dateTime!).getTime()
+          );
+        const nextMeeting =
+          upcoming.length > 0
+            ? {
+                name: upcoming[0].summary || "Untitled",
+                time: upcoming[0].start.dateTime!,
+              }
+            : null;
+
+        // Calculate free time: 8 working hours minus meeting hours
+        const meetingHours = events.reduce((total, e) => {
+          if (!e.start?.dateTime || !e.end?.dateTime) return total;
+          const duration =
+            (new Date(e.end.dateTime).getTime() -
+              new Date(e.start.dateTime).getTime()) /
+            (1000 * 60 * 60);
+          return total + duration;
+        }, 0);
+        const freeTimeHours = Math.max(0, 8 - meetingHours);
+
+        const structuredContent = {
+          taskCount,
+          overdueCount,
+          meetingsToday,
+          nextMeeting,
+          freeTimeHours: Math.round(freeTimeHours * 10) / 10,
+        };
+
+        return {
+          structuredContent,
+          content: [
+            {
+              type: "text" as const,
+              text: `Quick stats: ${taskCount} tasks (${overdueCount} overdue), ${meetingsToday} meetings, ${freeTimeHours.toFixed(1)}h free time${nextMeeting ? `. Next: ${nextMeeting.name}` : ""}`,
+            },
+          ],
+          isError: false,
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error fetching stats: ${error}`,
+            },
           ],
           isError: true,
         };

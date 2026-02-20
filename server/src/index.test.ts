@@ -354,6 +354,319 @@ describe("add-task handler", () => {
   });
 });
 
+// --- Helper to build GCal MCP-style JSON-RPC responses ---
+function gcalResponse(data: unknown) {
+  return {
+    ok: true,
+    json: () =>
+      Promise.resolve({
+        jsonrpc: "2.0",
+        id: 1,
+        result: {
+          content: [{ type: "text", text: JSON.stringify(data) }],
+        },
+      }),
+  };
+}
+
+function gcalError(message: string) {
+  return {
+    ok: true,
+    json: () =>
+      Promise.resolve({
+        jsonrpc: "2.0",
+        id: 1,
+        error: { code: -32000, message },
+      }),
+  };
+}
+
+// --- Sample calendar event data ---
+const sampleEvents = [
+  {
+    id: "evt1",
+    summary: "Standup",
+    start: { dateTime: "2026-02-20T09:00:00Z" },
+    end: { dateTime: "2026-02-20T09:30:00Z" },
+    location: "Zoom",
+    organizer: { email: "ugo@chattermill.io" },
+    colorId: "1",
+  },
+  {
+    id: "evt2",
+    summary: "Lunch with team",
+    start: { date: "2026-02-20" },
+    end: { date: "2026-02-21" },
+    location: "",
+    organizer: { email: "personal@gmail.com" },
+    colorId: "2",
+  },
+  {
+    id: "evt3",
+    summary: "Sprint Review",
+    start: { dateTime: "2026-02-20T14:00:00Z" },
+    end: { dateTime: "2026-02-20T15:00:00Z" },
+    location: "Meeting Room A",
+    organizer: { email: "ugo@chattermill.io" },
+    colorId: "1",
+  },
+];
+
+// --- callGcal unit tests ---
+describe("callGcal", () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  it("sends correct JSON-RPC request to GCal MCP", async () => {
+    mockFetch.mockResolvedValueOnce(gcalResponse(sampleEvents));
+
+    const { callGcal } = await loadHelpers();
+    await callGcal("list_events", { days: 1 });
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toContain("/mcp");
+    const body = JSON.parse(opts.body);
+    expect(body).toMatchObject({
+      jsonrpc: "2.0",
+      method: "tools/call",
+      params: {
+        name: "list_events",
+        arguments: { days: 1 },
+      },
+    });
+  });
+
+  it("uses correct GCal MCP URL (port 8006)", async () => {
+    mockFetch.mockResolvedValueOnce(gcalResponse(sampleEvents));
+
+    const { callGcal } = await loadHelpers();
+    await callGcal("list_events", { days: 1 });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("http://134.209.178.194:8006/mcp");
+  });
+
+  it("includes Authorization Bearer header", async () => {
+    mockFetch.mockResolvedValueOnce(gcalResponse(sampleEvents));
+
+    const { callGcal } = await loadHelpers();
+    await callGcal("list_events", { days: 1 });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(opts.headers).toHaveProperty("Authorization");
+    expect(opts.headers.Authorization).toMatch(/^Bearer .+/);
+  });
+
+  it("throws on JSON-RPC error response", async () => {
+    mockFetch.mockResolvedValueOnce(gcalError("Calendar unavailable"));
+
+    const { callGcal } = await loadHelpers();
+    await expect(callGcal("list_events", { days: 1 })).rejects.toThrow(
+      "Calendar unavailable"
+    );
+  });
+});
+
+// --- show-calendar handler ---
+describe("show-calendar handler", () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  it("returns structured event list with correct shape", async () => {
+    mockFetch.mockResolvedValueOnce(gcalResponse(sampleEvents));
+
+    const handler = await getHandler("show-calendar");
+    const result = await handler({});
+
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent).toBeDefined();
+    const sc = result.structuredContent!;
+    expect(sc.events).toHaveLength(3);
+    expect(sc.total).toBe(3);
+    expect(sc.date).toBeDefined();
+  });
+
+  it("maps event fields correctly", async () => {
+    mockFetch.mockResolvedValueOnce(gcalResponse(sampleEvents));
+
+    const handler = await getHandler("show-calendar");
+    const result = await handler({});
+    const events = result.structuredContent!.events as Array<{
+      title: string;
+      start: string;
+      end: string;
+      location: string;
+      isAllDay: boolean;
+    }>;
+
+    expect(events[0]).toMatchObject({
+      title: "Standup",
+      start: "2026-02-20T09:00:00Z",
+      end: "2026-02-20T09:30:00Z",
+      location: "Zoom",
+      isAllDay: false,
+    });
+
+    // All-day event (uses date instead of dateTime)
+    expect(events[1]).toMatchObject({
+      title: "Lunch with team",
+      isAllDay: true,
+    });
+  });
+
+  it("handles empty event list", async () => {
+    mockFetch.mockResolvedValueOnce(gcalResponse([]));
+
+    const handler = await getHandler("show-calendar");
+    const result = await handler({});
+
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent!.events).toEqual([]);
+    expect(result.structuredContent!.total).toBe(0);
+  });
+
+  it("returns text content with event summary", async () => {
+    mockFetch.mockResolvedValueOnce(gcalResponse(sampleEvents));
+
+    const handler = await getHandler("show-calendar");
+    const result = await handler({});
+
+    const text = result.content[0].text;
+    expect(text).toContain("3 events");
+    expect(text).toContain("Standup");
+  });
+
+  it("returns error on API failure", async () => {
+    mockFetch.mockResolvedValueOnce(gcalError("GCal API unavailable"));
+
+    const handler = await getHandler("show-calendar");
+    const result = await handler({});
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Error");
+  });
+
+  it("handles non-array response gracefully", async () => {
+    mockFetch.mockResolvedValueOnce(gcalResponse({ unexpected: true }));
+
+    const handler = await getHandler("show-calendar");
+    const result = await handler({});
+
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent!.events).toEqual([]);
+  });
+});
+
+// --- show-quick-stats handler ---
+describe("show-quick-stats handler", () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  it("returns structured stats with correct shape", async () => {
+    // First call: Trello get_cards, second call: GCal list_events
+    mockFetch
+      .mockResolvedValueOnce(trelloResponse(sampleCards))
+      .mockResolvedValueOnce(gcalResponse(sampleEvents));
+
+    const handler = await getHandler("show-quick-stats");
+    const result = await handler({});
+
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent).toBeDefined();
+    const sc = result.structuredContent!;
+    expect(sc.taskCount).toBe(3);
+    expect(sc.overdueCount).toBe(1);
+    expect(sc.meetingsToday).toBe(3);
+    expect(sc.nextMeeting).toBeDefined();
+    expect(typeof sc.freeTimeHours).toBe("number");
+  });
+
+  it("identifies next upcoming meeting", async () => {
+    // Use a future time so the "upcoming" filter finds it
+    const futureTime = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    const futureEnd = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+    const futureEvents = [
+      {
+        id: "evt-future",
+        summary: "Future Standup",
+        start: { dateTime: futureTime },
+        end: { dateTime: futureEnd },
+        location: "Zoom",
+        organizer: { email: "ugo@chattermill.io" },
+        colorId: "1",
+      },
+    ];
+
+    mockFetch
+      .mockResolvedValueOnce(trelloResponse(sampleCards))
+      .mockResolvedValueOnce(gcalResponse(futureEvents));
+
+    const handler = await getHandler("show-quick-stats");
+    const result = await handler({});
+    const next = result.structuredContent!.nextMeeting as {
+      name: string;
+      time: string;
+    } | null;
+
+    expect(next).not.toBeNull();
+    expect(next!.name).toBe("Future Standup");
+    expect(next!.time).toBeDefined();
+  });
+
+  it("handles no events gracefully", async () => {
+    mockFetch
+      .mockResolvedValueOnce(trelloResponse(sampleCards))
+      .mockResolvedValueOnce(gcalResponse([]));
+
+    const handler = await getHandler("show-quick-stats");
+    const result = await handler({});
+
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent!.meetingsToday).toBe(0);
+    expect(result.structuredContent!.nextMeeting).toBeNull();
+  });
+
+  it("handles no tasks gracefully", async () => {
+    mockFetch
+      .mockResolvedValueOnce(trelloResponse([]))
+      .mockResolvedValueOnce(gcalResponse(sampleEvents));
+
+    const handler = await getHandler("show-quick-stats");
+    const result = await handler({});
+
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent!.taskCount).toBe(0);
+    expect(result.structuredContent!.overdueCount).toBe(0);
+  });
+
+  it("returns text content with stats summary", async () => {
+    mockFetch
+      .mockResolvedValueOnce(trelloResponse(sampleCards))
+      .mockResolvedValueOnce(gcalResponse(sampleEvents));
+
+    const handler = await getHandler("show-quick-stats");
+    const result = await handler({});
+
+    const text = result.content[0].text;
+    expect(text).toContain("3 tasks");
+    expect(text).toContain("3 meetings");
+  });
+
+  it("returns error when Trello fails", async () => {
+    mockFetch.mockResolvedValueOnce(trelloError("Trello down"));
+
+    const handler = await getHandler("show-quick-stats");
+    const result = await handler({});
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Error");
+  });
+});
+
 // --- Test utilities ---
 
 /**
@@ -364,9 +677,15 @@ describe("add-task handler", () => {
 async function loadHelpers() {
   const TRELLO_MCP =
     process.env.TRELLO_MCP_URL || "http://134.209.178.194:8001";
+  const GCAL_MCP =
+    process.env.GCAL_MCP_URL || "http://134.209.178.194:8006";
   const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "test-token";
 
-  async function callTrello(tool: string, args: Record<string, unknown>) {
+  async function callMcp(
+    baseUrl: string,
+    tool: string,
+    args: Record<string, unknown>
+  ) {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
@@ -374,7 +693,7 @@ async function loadHelpers() {
       headers["Authorization"] = `Bearer ${MCP_AUTH_TOKEN}`;
     }
 
-    const res = await fetch(`${TRELLO_MCP}/mcp`, {
+    const res = await fetch(`${baseUrl}/mcp`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -390,6 +709,14 @@ async function loadHelpers() {
       (c: { type: string }) => c.type === "text"
     );
     return textContent ? JSON.parse(textContent.text) : data.result;
+  }
+
+  async function callTrello(tool: string, args: Record<string, unknown>) {
+    return callMcp(TRELLO_MCP, tool, args);
+  }
+
+  async function callGcal(tool: string, args: Record<string, unknown>) {
+    return callMcp(GCAL_MCP, tool, args);
   }
 
   async function getTasks(list: string = "todo_today") {
@@ -413,7 +740,11 @@ async function loadHelpers() {
     });
   }
 
-  return { callTrello, getTasks, completeTask, createTask };
+  async function getEvents(days: number = 1) {
+    return callGcal("list_events", { days });
+  }
+
+  return { callMcp, callTrello, callGcal, getTasks, completeTask, createTask, getEvents };
 }
 
 /**
@@ -421,7 +752,17 @@ async function loadHelpers() {
  * We can't import the module directly because it calls server.run() on load.
  */
 async function getHandler(widgetName: string) {
-  const { getTasks, completeTask, createTask } = await loadHelpers();
+  const { getTasks, completeTask, createTask, getEvents } = await loadHelpers();
+
+  type CalEvent = {
+    id: string;
+    summary: string;
+    start: { dateTime?: string; date?: string };
+    end: { dateTime?: string; date?: string };
+    location?: string;
+    organizer?: { email: string };
+    colorId?: string;
+  };
 
   const handlers: Record<string, (args: Record<string, string | undefined>) => Promise<{
     structuredContent?: Record<string, unknown>;
@@ -529,6 +870,110 @@ async function getHandler(widgetName: string) {
           structuredContent: { success: false, error: String(error) },
           content: [
             { type: "text" as const, text: `Error creating task: ${error}` },
+          ],
+          isError: true,
+        };
+      }
+    },
+
+    "show-calendar": async () => {
+      try {
+        const rawEvents = await getEvents(1);
+        const events = (Array.isArray(rawEvents) ? rawEvents : []).map(
+          (evt: CalEvent) => ({
+            title: evt.summary || "Untitled",
+            start: evt.start?.dateTime || evt.start?.date || "",
+            end: evt.end?.dateTime || evt.end?.date || "",
+            location: evt.location || "",
+            isAllDay: !evt.start?.dateTime,
+          })
+        );
+
+        return {
+          structuredContent: {
+            events,
+            date: new Date().toISOString().split("T")[0],
+            total: events.length,
+          },
+          content: [
+            {
+              type: "text" as const,
+              text: `Calendar: ${events.length} events today. ${events.map((e: { title: string }) => e.title).join(", ")}`,
+            },
+          ],
+          isError: false,
+        };
+      } catch (error) {
+        return {
+          content: [
+            { type: "text" as const, text: `Error fetching calendar: ${error}` },
+          ],
+          isError: true,
+        };
+      }
+    },
+
+    "show-quick-stats": async () => {
+      try {
+        const [cards, rawEvents] = await Promise.all([
+          getTasks("todo_today"),
+          getEvents(1),
+        ]);
+
+        const tasks = Array.isArray(cards) ? cards : [];
+        const events = (Array.isArray(rawEvents) ? rawEvents : []) as CalEvent[];
+
+        const taskCount = tasks.length;
+        const overdueCount = tasks.filter(
+          (t: { due: string | null }) =>
+            t.due && new Date(t.due) < new Date()
+        ).length;
+        const meetingsToday = events.length;
+
+        // Find next upcoming meeting (non-all-day, in the future)
+        const now = new Date();
+        const upcoming = events
+          .filter((e) => e.start?.dateTime && new Date(e.start.dateTime) > now)
+          .sort(
+            (a, b) =>
+              new Date(a.start.dateTime!).getTime() -
+              new Date(b.start.dateTime!).getTime()
+          );
+        const nextMeeting = upcoming.length > 0
+          ? { name: upcoming[0].summary || "Untitled", time: upcoming[0].start.dateTime! }
+          : null;
+
+        // Calculate free time: 8 working hours minus meeting hours
+        const meetingHours = events.reduce((total, e) => {
+          if (!e.start?.dateTime || !e.end?.dateTime) return total;
+          const duration =
+            (new Date(e.end.dateTime).getTime() -
+              new Date(e.start.dateTime).getTime()) /
+            (1000 * 60 * 60);
+          return total + duration;
+        }, 0);
+        const freeTimeHours = Math.max(0, 8 - meetingHours);
+
+        return {
+          structuredContent: {
+            taskCount,
+            overdueCount,
+            meetingsToday,
+            nextMeeting,
+            freeTimeHours: Math.round(freeTimeHours * 10) / 10,
+          },
+          content: [
+            {
+              type: "text" as const,
+              text: `Quick stats: ${taskCount} tasks (${overdueCount} overdue), ${meetingsToday} meetings, ${freeTimeHours.toFixed(1)}h free time${nextMeeting ? `. Next: ${nextMeeting.name}` : ""}`,
+            },
+          ],
+          isError: false,
+        };
+      } catch (error) {
+        return {
+          content: [
+            { type: "text" as const, text: `Error fetching stats: ${error}` },
           ],
           isError: true,
         };

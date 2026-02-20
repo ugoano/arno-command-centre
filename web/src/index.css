@@ -347,3 +347,180 @@ body {
   color: var(--text-dim);
   font-family: "JetBrains Mono", monospace;
 }
+
+/* ========== Calendar Panel ========== */
+.cal-panel {
+  --cal-blue: #74b9ff;
+  --cal-green: var(--green);
+}
+
+.cal-allday-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cal-event {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  border-left: 3px solid var(--cal-blue);
+  transition: all 0.15s ease;
+}
+
+.cal-event:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.cal-event-allday {
+  border-left-color: var(--cal-green);
+  background: var(--green-glow);
+}
+
+.cal-allday-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--green-glow);
+  color: var(--green);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.cal-event-time {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  min-width: 90px;
+}
+
+.cal-time-sep {
+  color: var(--border);
+}
+
+.cal-event-details {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.cal-event-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.cal-event-location {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cal-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.now-indicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--red);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.now-indicator::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  background: var(--red);
+  border-radius: 50%;
+}
+
+/* ========== Quick Stats Bar ========== */
+.qs-bar {
+  padding: 12px 16px;
+  min-height: auto;
+}
+
+.qs-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.qs-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 64px;
+  transition: all 0.15s ease;
+}
+
+.qs-badge:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.qs-badge-wide {
+  flex: 1;
+  min-width: 120px;
+}
+
+.qs-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.qs-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.qs-overdue-highlight {
+  border-color: var(--red);
+  background: var(--red-glow);
+}
+
+.qs-overdue-highlight .qs-value {
+  color: var(--red);
+}
+
+.qs-next-name {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
