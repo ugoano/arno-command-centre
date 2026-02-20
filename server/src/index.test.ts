@@ -89,6 +89,27 @@ describe("callTrello", () => {
     });
   });
 
+  it("includes Authorization Bearer header when MCP_AUTH_TOKEN is set", async () => {
+    mockFetch.mockResolvedValueOnce(trelloResponse(sampleCards));
+
+    const { getTasks } = await loadHelpers();
+    await getTasks("todo_today");
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(opts.headers).toHaveProperty("Authorization");
+    expect(opts.headers.Authorization).toMatch(/^Bearer .+/);
+  });
+
+  it("uses correct Trello MCP URL (port 8001)", async () => {
+    mockFetch.mockResolvedValueOnce(trelloResponse(sampleCards));
+
+    const { getTasks } = await loadHelpers();
+    await getTasks("todo_today");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("http://134.209.178.194:8001/mcp");
+  });
+
   it("throws on JSON-RPC error response", async () => {
     mockFetch.mockResolvedValueOnce(trelloError("Board not found"));
 
@@ -342,12 +363,20 @@ describe("add-task handler", () => {
  */
 async function loadHelpers() {
   const TRELLO_MCP =
-    process.env.TRELLO_MCP_URL || "http://134.209.178.194:8002";
+    process.env.TRELLO_MCP_URL || "http://134.209.178.194:8001";
+  const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "test-token";
 
   async function callTrello(tool: string, args: Record<string, unknown>) {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (MCP_AUTH_TOKEN) {
+      headers["Authorization"] = `Bearer ${MCP_AUTH_TOKEN}`;
+    }
+
     const res = await fetch(`${TRELLO_MCP}/mcp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,

@@ -2,12 +2,20 @@ import { McpServer } from "skybridge/server";
 import { z } from "zod";
 
 // --- Trello API helpers ---
-const TRELLO_MCP = process.env.TRELLO_MCP_URL || "http://134.209.178.194:8002";
+const TRELLO_MCP = process.env.TRELLO_MCP_URL || "http://134.209.178.194:8001";
+const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
 
 async function callTrello(tool: string, args: Record<string, unknown>) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (MCP_AUTH_TOKEN) {
+    headers["Authorization"] = `Bearer ${MCP_AUTH_TOKEN}`;
+  }
+
   const res = await fetch(`${TRELLO_MCP}/mcp`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
