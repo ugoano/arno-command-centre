@@ -381,34 +381,34 @@ function gcalError(message: string) {
   };
 }
 
-// --- Sample calendar event data ---
+// --- Sample calendar event data (matches GCal MCP flat response shape) ---
 const sampleEvents = [
   {
     id: "evt1",
     summary: "Standup",
-    start: { dateTime: "2026-02-20T09:00:00Z" },
-    end: { dateTime: "2026-02-20T09:30:00Z" },
+    start: "2026-02-20T09:00:00Z",
+    end: "2026-02-20T09:30:00Z",
     location: "Zoom",
-    organizer: { email: "ugo@chattermill.io" },
-    colorId: "1",
+    description: "",
+    htmlLink: "https://www.google.com/calendar/event?eid=abc123",
   },
   {
     id: "evt2",
     summary: "Lunch with team",
-    start: { date: "2026-02-20" },
-    end: { date: "2026-02-21" },
+    start: "2026-02-20",
+    end: "2026-02-21",
     location: "",
-    organizer: { email: "personal@gmail.com" },
-    colorId: "2",
+    description: "",
+    htmlLink: "https://www.google.com/calendar/event?eid=def456",
   },
   {
     id: "evt3",
     summary: "Sprint Review",
-    start: { dateTime: "2026-02-20T14:00:00Z" },
-    end: { dateTime: "2026-02-20T15:00:00Z" },
+    start: "2026-02-20T14:00:00Z",
+    end: "2026-02-20T15:00:00Z",
     location: "Meeting Room A",
-    organizer: { email: "ugo@chattermill.io" },
-    colorId: "1",
+    description: "",
+    htmlLink: "https://www.google.com/calendar/event?eid=ghi789",
   },
 ];
 
@@ -476,7 +476,7 @@ describe("show-calendar handler", () => {
   });
 
   it("returns structured event list with correct shape", async () => {
-    mockFetch.mockResolvedValueOnce(gcalResponse(sampleEvents));
+    mockFetch.mockResolvedValueOnce(gcalResponse({ events: sampleEvents, count: 3 }));
 
     const handler = await getHandler("show-calendar");
     const result = await handler({});
@@ -490,7 +490,7 @@ describe("show-calendar handler", () => {
   });
 
   it("maps event fields correctly", async () => {
-    mockFetch.mockResolvedValueOnce(gcalResponse(sampleEvents));
+    mockFetch.mockResolvedValueOnce(gcalResponse({ events: sampleEvents, count: 3 }));
 
     const handler = await getHandler("show-calendar");
     const result = await handler({});
@@ -510,7 +510,7 @@ describe("show-calendar handler", () => {
       isAllDay: false,
     });
 
-    // All-day event (uses date instead of dateTime)
+    // All-day event (no T in start string)
     expect(events[1]).toMatchObject({
       title: "Lunch with team",
       isAllDay: true,
@@ -518,7 +518,7 @@ describe("show-calendar handler", () => {
   });
 
   it("handles empty event list", async () => {
-    mockFetch.mockResolvedValueOnce(gcalResponse([]));
+    mockFetch.mockResolvedValueOnce(gcalResponse({ events: [], count: 0 }));
 
     const handler = await getHandler("show-calendar");
     const result = await handler({});
@@ -529,7 +529,7 @@ describe("show-calendar handler", () => {
   });
 
   it("returns text content with event summary", async () => {
-    mockFetch.mockResolvedValueOnce(gcalResponse(sampleEvents));
+    mockFetch.mockResolvedValueOnce(gcalResponse({ events: sampleEvents, count: 3 }));
 
     const handler = await getHandler("show-calendar");
     const result = await handler({});
@@ -570,7 +570,7 @@ describe("show-quick-stats handler", () => {
     // First call: Trello get_cards, second call: GCal list_events
     mockFetch
       .mockResolvedValueOnce(trelloResponse(sampleCards))
-      .mockResolvedValueOnce(gcalResponse(sampleEvents));
+      .mockResolvedValueOnce(gcalResponse({ events: sampleEvents, count: 3 }));
 
     const handler = await getHandler("show-quick-stats");
     const result = await handler({});
@@ -593,17 +593,17 @@ describe("show-quick-stats handler", () => {
       {
         id: "evt-future",
         summary: "Future Standup",
-        start: { dateTime: futureTime },
-        end: { dateTime: futureEnd },
+        start: futureTime,
+        end: futureEnd,
         location: "Zoom",
-        organizer: { email: "ugo@chattermill.io" },
-        colorId: "1",
+        description: "",
+        htmlLink: "https://calendar.google.com/event?id=evt-future",
       },
     ];
 
     mockFetch
       .mockResolvedValueOnce(trelloResponse(sampleCards))
-      .mockResolvedValueOnce(gcalResponse(futureEvents));
+      .mockResolvedValueOnce(gcalResponse({ events: futureEvents, count: 1 }));
 
     const handler = await getHandler("show-quick-stats");
     const result = await handler({});
@@ -620,7 +620,7 @@ describe("show-quick-stats handler", () => {
   it("handles no events gracefully", async () => {
     mockFetch
       .mockResolvedValueOnce(trelloResponse(sampleCards))
-      .mockResolvedValueOnce(gcalResponse([]));
+      .mockResolvedValueOnce(gcalResponse({ events: [], count: 0 }));
 
     const handler = await getHandler("show-quick-stats");
     const result = await handler({});
@@ -633,7 +633,7 @@ describe("show-quick-stats handler", () => {
   it("handles no tasks gracefully", async () => {
     mockFetch
       .mockResolvedValueOnce(trelloResponse([]))
-      .mockResolvedValueOnce(gcalResponse(sampleEvents));
+      .mockResolvedValueOnce(gcalResponse({ events: sampleEvents, count: 3 }));
 
     const handler = await getHandler("show-quick-stats");
     const result = await handler({});
@@ -646,7 +646,7 @@ describe("show-quick-stats handler", () => {
   it("returns text content with stats summary", async () => {
     mockFetch
       .mockResolvedValueOnce(trelloResponse(sampleCards))
-      .mockResolvedValueOnce(gcalResponse(sampleEvents));
+      .mockResolvedValueOnce(gcalResponse({ events: sampleEvents, count: 3 }));
 
     const handler = await getHandler("show-quick-stats");
     const result = await handler({});
@@ -741,7 +741,17 @@ async function loadHelpers() {
   }
 
   async function getEvents(days: number = 1) {
-    return callGcal("list_events", { days });
+    // Matches production: use timeMin/timeMax, extract .events from result
+    const now = new Date();
+    const end = new Date(now);
+    end.setDate(end.getDate() + days);
+    end.setHours(23, 59, 59, 999);
+    const result = await callGcal("list_events", {
+      timeMin: now.toISOString(),
+      timeMax: end.toISOString(),
+      maxResults: 25,
+    });
+    return result?.events || (Array.isArray(result) ? result : []);
   }
 
   return { callMcp, callTrello, callGcal, getTasks, completeTask, createTask, getEvents };
@@ -754,14 +764,15 @@ async function loadHelpers() {
 async function getHandler(widgetName: string) {
   const { getTasks, completeTask, createTask, getEvents } = await loadHelpers();
 
+  // GCal MCP returns flat start/end strings
   type CalEvent = {
     id: string;
     summary: string;
-    start: { dateTime?: string; date?: string };
-    end: { dateTime?: string; date?: string };
+    start: string;
+    end: string;
     location?: string;
-    organizer?: { email: string };
-    colorId?: string;
+    description?: string;
+    htmlLink?: string;
   };
 
   const handlers: Record<string, (args: Record<string, string | undefined>) => Promise<{
@@ -879,13 +890,14 @@ async function getHandler(widgetName: string) {
     "show-calendar": async () => {
       try {
         const rawEvents = await getEvents(1);
+        // getEvents() already extracts the events array
         const events = (Array.isArray(rawEvents) ? rawEvents : []).map(
           (evt: CalEvent) => ({
             title: evt.summary || "Untitled",
-            start: evt.start?.dateTime || evt.start?.date || "",
-            end: evt.end?.dateTime || evt.end?.date || "",
+            start: evt.start || "",
+            end: evt.end || "",
             location: evt.location || "",
-            isAllDay: !evt.start?.dateTime,
+            isAllDay: typeof evt.start === "string" && !evt.start.includes("T"),
           })
         );
 
@@ -915,6 +927,7 @@ async function getHandler(widgetName: string) {
 
     "show-quick-stats": async () => {
       try {
+        // getEvents() already extracts the events array
         const [cards, rawEvents] = await Promise.all([
           getTasks("todo_today"),
           getEvents(1),
@@ -931,24 +944,25 @@ async function getHandler(widgetName: string) {
         const meetingsToday = events.length;
 
         // Find next upcoming meeting (non-all-day, in the future)
+        // GCal MCP returns flat start/end strings
         const now = new Date();
         const upcoming = events
-          .filter((e) => e.start?.dateTime && new Date(e.start.dateTime) > now)
+          .filter((e) => e.start?.includes("T") && new Date(e.start) > now)
           .sort(
             (a, b) =>
-              new Date(a.start.dateTime!).getTime() -
-              new Date(b.start.dateTime!).getTime()
+              new Date(a.start).getTime() -
+              new Date(b.start).getTime()
           );
         const nextMeeting = upcoming.length > 0
-          ? { name: upcoming[0].summary || "Untitled", time: upcoming[0].start.dateTime! }
+          ? { name: upcoming[0].summary || "Untitled", time: upcoming[0].start }
           : null;
 
         // Calculate free time: 8 working hours minus meeting hours
         const meetingHours = events.reduce((total, e) => {
-          if (!e.start?.dateTime || !e.end?.dateTime) return total;
+          if (!e.start?.includes("T") || !e.end?.includes("T")) return total;
           const duration =
-            (new Date(e.end.dateTime).getTime() -
-              new Date(e.start.dateTime).getTime()) /
+            (new Date(e.end).getTime() -
+              new Date(e.start).getTime()) /
             (1000 * 60 * 60);
           return total + duration;
         }, 0);

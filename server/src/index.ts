@@ -67,17 +67,29 @@ async function createTask(name: string, description?: string) {
 }
 
 async function getEvents(days: number = 1) {
-  return callGcal("list_events", { days });
+  // GCal MCP accepts timeMin/timeMax (ISO strings), not "days"
+  const now = new Date();
+  const end = new Date(now);
+  end.setDate(end.getDate() + days);
+  end.setHours(23, 59, 59, 999);
+  const result = await callGcal("list_events", {
+    timeMin: now.toISOString(),
+    timeMax: end.toISOString(),
+    maxResults: 25,
+  });
+  // GCal MCP returns {events: [...], count: N} — extract the array
+  return result?.events || (Array.isArray(result) ? result : []);
 }
 
+// GCal MCP returns flat start/end strings, not nested objects
 type CalEvent = {
   id: string;
   summary: string;
-  start: { dateTime?: string; date?: string };
-  end: { dateTime?: string; date?: string };
+  start: string;
+  end: string;
   location?: string;
-  organizer?: { email: string };
-  colorId?: string;
+  description?: string;
+  htmlLink?: string;
 };
 
 // --- Server ---
@@ -284,13 +296,14 @@ const server = new McpServer(
     async ({ days }) => {
       try {
         const rawEvents = await getEvents(days);
+        // getEvents() already extracts the events array
         const events = (Array.isArray(rawEvents) ? rawEvents : []).map(
           (evt: CalEvent) => ({
             title: evt.summary || "Untitled",
-            start: evt.start?.dateTime || evt.start?.date || "",
-            end: evt.end?.dateTime || evt.end?.date || "",
+            start: evt.start || "",
+            end: evt.end || "",
             location: evt.location || "",
-            isAllDay: !evt.start?.dateTime,
+            isAllDay: typeof evt.start === "string" && !evt.start.includes("T"),
           })
         );
 
@@ -340,6 +353,7 @@ const server = new McpServer(
     },
     async () => {
       try {
+        // getEvents() already extracts the events array
         const [cards, rawEvents] = await Promise.all([
           getTasks("todo_today"),
           getEvents(1),
@@ -358,30 +372,31 @@ const server = new McpServer(
         const meetingsToday = events.length;
 
         // Find next upcoming meeting (non-all-day, in the future)
+        // GCal MCP returns flat start/end strings
         const now = new Date();
         const upcoming = events
           .filter(
-            (e) => e.start?.dateTime && new Date(e.start.dateTime) > now
+            (e) => e.start?.includes("T") && new Date(e.start) > now
           )
           .sort(
             (a, b) =>
-              new Date(a.start.dateTime!).getTime() -
-              new Date(b.start.dateTime!).getTime()
+              new Date(a.start).getTime() -
+              new Date(b.start).getTime()
           );
         const nextMeeting =
           upcoming.length > 0
             ? {
                 name: upcoming[0].summary || "Untitled",
-                time: upcoming[0].start.dateTime!,
+                time: upcoming[0].start,
               }
             : null;
 
         // Calculate free time: 8 working hours minus meeting hours
         const meetingHours = events.reduce((total, e) => {
-          if (!e.start?.dateTime || !e.end?.dateTime) return total;
+          if (!e.start?.includes("T") || !e.end?.includes("T")) return total;
           const duration =
-            (new Date(e.end.dateTime).getTime() -
-              new Date(e.start.dateTime).getTime()) /
+            (new Date(e.end).getTime() -
+              new Date(e.start).getTime()) /
             (1000 * 60 * 60);
           return total + duration;
         }, 0);
