@@ -122,7 +122,18 @@ async function getWeather(location: string = "London") {
 }
 
 async function getTasks(list: string = "todo_today") {
-  return callTrello("get_cards", { list, board: "bankai" });
+  const raw = await callTrello("get_cards", { list, board: "bankai" });
+  // Strip to essential fields only — raw Trello responses can exceed 5MB
+  return (Array.isArray(raw) ? raw : []).map(
+    (card: { id: string; name: string; desc?: string; due?: string | null; labels?: Array<{ name: string; color: string }>; url?: string }) => ({
+      id: card.id,
+      name: card.name,
+      desc: (card.desc || "").slice(0, 120),
+      due: card.due || null,
+      labels: (card.labels || []).map((l: { name: string; color: string }) => ({ name: l.name, color: l.color })),
+      url: card.url || "",
+    })
+  );
 }
 
 async function completeTask(cardId: string) {
