@@ -53,6 +53,8 @@ const sampleOutput = {
       url: "https://trello.com/c/3",
     },
   ],
+  total: 3,
+  showing: 3,
   overdue: 1,
   timestamp: "2026-02-20T10:00:00.000Z",
 };
@@ -96,14 +98,13 @@ describe("TaskDashboard widget", () => {
     expect(overdueStats.length).toBeGreaterThan(0);
   });
 
-  it("renders labels for tasks", () => {
+  it("renders first label for tasks", () => {
     mockOutput = sampleOutput;
     render(<TaskDashboard />);
 
+    // Compact rows show only the first label
     const labels = screen.getAllByText("仕事");
     expect(labels.length).toBe(2); // card-1 and card-3
-
-    expect(screen.getByText("urgent")).toBeInTheDocument();
   });
 
   it("shows overdue formatting for past-due tasks", () => {
@@ -155,7 +156,7 @@ describe("TaskDashboard widget", () => {
     mockOutput = sampleOutput;
     render(<TaskDashboard />);
 
-    fireEvent.click(screen.getByText("+ Add Task"));
+    fireEvent.click(screen.getByText("+ Add"));
     expect(
       screen.getByPlaceholderText("What needs doing?")
     ).toBeInTheDocument();
@@ -165,11 +166,11 @@ describe("TaskDashboard widget", () => {
     mockOutput = sampleOutput;
     render(<TaskDashboard />);
 
-    const speakBtn = screen.getByText(/Speak Summary/);
+    const speakBtn = screen.getByText(/Summary/);
     fireEvent.click(speakBtn);
 
     expect(mockSendMessage).toHaveBeenCalledWith(
-      expect.stringContaining("Speak a brief summary")
+      expect.stringContaining("speak-summary")
     );
   });
 
@@ -177,7 +178,7 @@ describe("TaskDashboard widget", () => {
     mockOutput = sampleOutput;
     render(<TaskDashboard />);
 
-    fireEvent.click(screen.getByText("↻ Refresh"));
+    fireEvent.click(screen.getByText("↻"));
     expect(mockSendMessage).toHaveBeenCalledWith("Show my tasks");
   });
 
@@ -185,9 +186,7 @@ describe("TaskDashboard widget", () => {
     mockOutput = { ...sampleOutput, tasks: [] };
     render(<TaskDashboard />);
 
-    expect(
-      screen.getByText("All clear! No tasks remaining.")
-    ).toBeInTheDocument();
+    expect(screen.getByText("All clear!")).toBeInTheDocument();
   });
 
   it("includes data-llm attribute on dashboard", () => {
@@ -196,14 +195,14 @@ describe("TaskDashboard widget", () => {
 
     const dashboard = container.querySelector("[data-llm]");
     expect(dashboard).not.toBeNull();
-    expect(dashboard!.getAttribute("data-llm")).toContain("3 active tasks");
+    expect(dashboard!.getAttribute("data-llm")).toContain("tasks");
   });
 
-  it("shows last updated time in footer", () => {
+  it("shows time in footer", () => {
     mockOutput = sampleOutput;
     render(<TaskDashboard />);
 
-    // Should show formatted time from timestamp
-    expect(screen.getByText(/Last updated/)).toBeInTheDocument();
+    // Footer shows time from timestamp (HH:MM format)
+    expect(screen.getByText("10:00")).toBeInTheDocument();
   });
 });

@@ -37,11 +37,12 @@ function TaskDashboard() {
     );
   }
 
-  const { tasks, overdue, list, timestamp } = output;
+  const { tasks, overdue, total, showing, list, timestamp } = output;
   const isFullscreen = displayMode === "fullscreen";
   const activeTasks = tasks.filter(
     (t: Task) => !completedIds.has(t.id)
   );
+  const hiddenCount = (total || tasks.length) - (showing || tasks.length);
 
   function handleComplete(task: Task) {
     setCompletedIds((prev) => new Set([...prev, task.id]));
@@ -66,28 +67,27 @@ function TaskDashboard() {
     const diff = d.getTime() - now.getTime();
     const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
     if (days < 0) return `${Math.abs(days)}d overdue`;
-    if (days === 0) return "Due today";
-    if (days === 1) return "Due tomorrow";
-    return `Due in ${days}d`;
+    if (days === 0) return "Today";
+    if (days === 1) return "Tomorrow";
+    return `${days}d`;
   }
 
   return (
     <div
       className={`dashboard ${isFullscreen ? "fullscreen" : "inline"}`}
-      data-llm={`Task dashboard: ${activeTasks.length} active tasks in ${list}, ${overdue} overdue. ${completedIds.size} just completed.`}
+      data-llm={`Task dashboard: ${activeTasks.length} shown of ${total || tasks.length} tasks in ${list}, ${overdue} overdue. ${completedIds.size} just completed.`}
     >
-      {/* Header */}
+      {/* Compact header */}
       <div className="header">
         <div className="header-left">
           <h1 className="title">
             <span className="logo">A</span>
             rno Command Centre
           </h1>
-          <span className="subtitle">{list}</span>
         </div>
         <div className="header-right">
           <div className="stat">
-            <span className="stat-value">{activeTasks.length}</span>
+            <span className="stat-value">{total || activeTasks.length}</span>
             <span className="stat-label">tasks</span>
           </div>
           {overdue > 0 && (
@@ -105,31 +105,31 @@ function TaskDashboard() {
         </div>
       </div>
 
-      {/* Actions bar */}
+      {/* Compact actions */}
       <div className="actions-bar">
         <button
           className="btn btn-add"
           onClick={() => setShowAdd(!showAdd)}
           data-llm="Add new task button"
         >
-          + Add Task
+          + Add
         </button>
         <button
           className="btn btn-speak"
           onClick={() =>
             sendMessage(
-              `Speak a brief summary of my ${activeTasks.length} tasks`
+              `Use the speak-summary tool to get my task summary and speak the result aloud`
             )
           }
           data-llm="Request spoken summary button"
         >
-          🔊 Speak Summary
+          🔊 Summary
         </button>
         <button
           className="btn btn-refresh"
           onClick={() => sendMessage("Show my tasks")}
         >
-          ↻ Refresh
+          ↻
         </button>
       </div>
 
@@ -150,62 +150,53 @@ function TaskDashboard() {
             onClick={handleAdd}
             disabled={!newTask.trim() || isAdding}
           >
-            {isAdding ? "Adding..." : "Add"}
+            {isAdding ? "..." : "Add"}
           </button>
         </div>
       )}
 
-      {/* Task list */}
+      {/* Task list — compact rows */}
       <div className="task-list">
         {activeTasks.map((task: Task) => (
           <div
             key={task.id}
-            className={`task-card ${isOverdue(task.due) ? "task-overdue" : ""}`}
-            data-llm={`Task: ${task.name}${task.due ? `, ${formatDue(task.due)}` : ""}${task.labels.length ? `, labels: ${task.labels.join(",")}` : ""}`}
+            className={`task-row ${isOverdue(task.due) ? "task-overdue" : ""}`}
+            data-llm={`Task: ${task.name}${task.due ? `, ${formatDue(task.due)}` : ""}`}
           >
-            <div className="task-main">
-              <button
-                className="check-btn"
-                onClick={() => handleComplete(task)}
-                disabled={isCompleting}
-                title="Mark done"
+            <button
+              className="check-btn"
+              onClick={() => handleComplete(task)}
+              disabled={isCompleting}
+              title="Mark done"
+            >
+              ○
+            </button>
+            <span className="task-name">{task.name}</span>
+            {task.labels.length > 0 && (
+              <span className="label">{task.labels[0]}</span>
+            )}
+            {task.due && (
+              <span
+                className={`due-badge ${isOverdue(task.due) ? "due-overdue" : ""}`}
               >
-                ○
-              </button>
-              <div className="task-content">
-                <span className="task-name">{task.name}</span>
-                {task.description && (
-                  <span className="task-desc">{task.description}</span>
-                )}
-              </div>
-            </div>
-            <div className="task-meta">
-              {task.labels.map((label) => (
-                <span key={label} className="label">
-                  {label}
-                </span>
-              ))}
-              {task.due && (
-                <span
-                  className={`due ${isOverdue(task.due) ? "due-overdue" : ""}`}
-                >
-                  {formatDue(task.due)}
-                </span>
-              )}
-            </div>
+                {formatDue(task.due)}
+              </span>
+            )}
           </div>
         ))}
-        {activeTasks.length === 0 && (
-          <div className="empty">
-            All clear! No tasks remaining.
+        {hiddenCount > 0 && (
+          <div className="more-tasks">
+            +{hiddenCount} more tasks
           </div>
+        )}
+        {activeTasks.length === 0 && (
+          <div className="empty">All clear!</div>
         )}
       </div>
 
       {/* Footer */}
       <div className="footer">
         <span>
-          Last updated:{" "}
           {new Date(timestamp).toLocaleTimeString("en-GB", {
             hour: "2-digit",
             minute: "2-digit",

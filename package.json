@@ -10,7 +10,8 @@
     "start": "skybridge start",
     "deploy": "alpic deploy",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "postinstall": "node patches/patch-skybridge.cjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",

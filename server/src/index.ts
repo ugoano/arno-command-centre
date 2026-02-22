@@ -1,5 +1,6 @@
 import { McpServer } from "skybridge/server";
 import { z } from "zod";
+import { generateSpeakSummary } from "./speak-summary.js";
 
 // --- MCP API helpers ---
 const TRELLO_MCP = process.env.TRELLO_MCP_URL || "http://134.209.178.194:8001";
@@ -181,15 +182,20 @@ const server = new McpServer(
           .optional()
           .default("todo_today")
           .describe("Trello list to show (default: todo_today)"),
+        limit: z
+          .number()
+          .optional()
+          .default(10)
+          .describe("Max tasks to return (default: 10)"),
       },
       _meta: {
         "openai/widgetAccessible": true,
       },
     },
-    async ({ list }) => {
+    async ({ list, limit }) => {
       try {
         const cards = await getTasks(list);
-        const tasks = (Array.isArray(cards) ? cards : []).map(
+        const allTasks = (Array.isArray(cards) ? cards : []).map(
           (card: {
             id: string;
             name: string;
@@ -209,15 +215,18 @@ const server = new McpServer(
           })
         );
 
-        const overdue = tasks.filter(
+        const overdue = allTasks.filter(
           (t: { due: string | null }) =>
             t.due && new Date(t.due) < new Date()
         ).length;
 
+        const tasks = allTasks.slice(0, limit);
+
         const structuredContent = {
           list,
           tasks,
-          total: tasks.length,
+          total: allTasks.length,
+          showing: tasks.length,
           overdue,
           timestamp: new Date().toISOString(),
         };
@@ -227,7 +236,7 @@ const server = new McpServer(
           content: [
             {
               type: "text" as const,
-              text: `Task dashboard: ${tasks.length} tasks in ${list}, ${overdue} overdue. Tasks: ${tasks.map((t: { name: string }) => t.name).join(", ")}`,
+              text: `Task dashboard: ${allTasks.length} tasks in ${list} (showing top ${tasks.length}), ${overdue} overdue. Tasks: ${tasks.map((t: { name: string }) => t.name).join(", ")}`,
             },
           ],
           isError: false,
@@ -492,6 +501,49 @@ const server = new McpServer(
             {
               type: "text" as const,
               text: `Error fetching stats: ${error}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+  )
+
+  // --- Tool: Speak Summary ---
+  .registerTool(
+    "speak-summary",
+    {
+      description:
+        "Generate a concise spoken summary of the user's tasks. Returns natural English text that MUST be spoken aloud to the user using text-to-speech. Call this when the user requests a spoken task summary from the dashboard.",
+      inputSchema: {
+        list: z
+          .string()
+          .optional()
+          .default("todo_today")
+          .describe("Trello list to summarise (default: todo_today)"),
+      },
+    },
+    async ({ list }) => {
+      try {
+        const cards = await getTasks(list);
+        const tasks = Array.isArray(cards) ? cards : [];
+        const summary = generateSpeakSummary(tasks);
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `[SPEAK THIS ALOUD] ${summary}`,
+            },
+          ],
+          isError: false,
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error generating summary: ${error}`,
             },
           ],
           isError: true,
