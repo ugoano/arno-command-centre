@@ -10,6 +10,7 @@ Ask your AI assistant to "show my tasks" and instead of a text list, you get an 
 - **Task Dashboard** — Compact task list with real-time Trello integration
 - **Calendar Panel** — Today's events in a timeline with all-day events separated
 - **Quick Stats Bar** — At-a-glance badges: task count, overdue, meetings, free time
+- **Daily Briefing** — Unified view combining tasks, calendar, and weather from 3 MCP backends
 - **Task Completion** — Mark tasks done directly from the widget
 - **Task Creation** — Add tasks via the widget or natural language
 - **Speak Summary** — One-click button for a spoken audio summary of your tasks
@@ -27,9 +28,10 @@ Claude Web  <-->  Skybridge MCP Server  <-->  Backend MCP Servers
    |                    |                         |
    |-- Widgets (React)  |-- Tools (TypeScript)    |-- Trello MCP (cards)
    |-- Follow-up msgs   |-- Resources (HTML)      |-- GCal MCP (events)
+                                                   |-- Weather MCP (forecast)
 ```
 
-The server acts as an **MCP gateway**, maintaining sessions with backend Trello and Google Calendar MCP servers via streamable-http protocol. Widgets render inside Claude Web using Skybridge's resource system with proper CSP and domain hashing.
+The server acts as an **MCP gateway**, maintaining sessions with backend Trello, Google Calendar, and Weather MCP servers via streamable-http protocol. Widgets render inside Claude Web using Skybridge's resource system with proper CSP and domain hashing.
 
 Built on top of real infrastructure used daily — 11 MCP servers, 3 months of production use.
 
@@ -38,7 +40,7 @@ Built on top of real infrastructure used daily — 11 MCP servers, 3 months of p
 ```bash
 npm install
 npm run dev          # DevTools at localhost:3000
-npm test             # Run 91 unit tests
+npm test             # Run 105 unit tests
 ```
 
 Connect to Claude Web: Settings -> Connectors -> Add custom connector -> `[your-url]/mcp`
@@ -48,7 +50,7 @@ Connect to Claude Web: Settings -> Connectors -> Add custom connector -> `[your-
 ```
 server/
   src/
-    index.ts              # MCP server — 5 widgets + 1 tool, API helpers
+    index.ts              # MCP server — 6 widgets + 1 tool, API helpers
     speak-summary.ts      # Pure function for generating spoken summaries
     speak-summary.test.ts # Unit tests for summary generation
     index.test.ts         # Server handler tests
@@ -58,6 +60,7 @@ web/
       show-task-dashboard.tsx  # Task list with complete/add/speak
       show-calendar.tsx        # Calendar timeline
       show-quick-stats.tsx     # Stats badge bar
+      show-daily-briefing.tsx  # Unified briefing: tasks + calendar + weather
       complete-task.tsx        # Task completion confirmation
       add-task.tsx             # Task creation form
     index.css                  # Shared dark theme styles
@@ -77,11 +80,12 @@ vitest.config.ts               # Test configuration
 | `show-quick-stats` | Widget | Badge bar with task/meeting/free-time stats |
 | `complete-task` | Widget | Move a task to done |
 | `add-task` | Widget | Create a new task on todo_today |
+| `show-daily-briefing` | Widget | Unified daily briefing with tasks, calendar, and weather |
 | `speak-summary` | Tool | Generate concise spoken task summary |
 
 ## Testing
 
-91 tests across 7 files using Vitest + React Testing Library:
+105 tests across 8 files using Vitest + React Testing Library:
 
 ```bash
 npm test             # Run all tests
@@ -91,12 +95,13 @@ npm run test:watch   # Watch mode for TDD
 - **Server tests** — Handler logic, MCP response formatting, error handling
 - **Summary tests** — Pure function for spoken summary generation (edge cases, empty lists, overdue)
 - **Widget tests** — Rendering, interactions, data-llm annotations, follow-up messages, error states
+- **Briefing tests** — Weather, calendar, and task data rendering with forecast display
 
 ## Tech Stack
 
 - **Framework:** [Skybridge](https://docs.skybridge.tech) (TypeScript, MCP + React widgets)
 - **Hosting:** [Alpic](https://alpic.live) (MCP app hosting platform)
-- **Backend:** Trello MCP + Google Calendar MCP (streamable-http)
+- **Backend:** Trello MCP + Google Calendar MCP + Weather MCP (streamable-http)
 - **Frontend:** React 19, Vite 7, custom dark theme
 - **Testing:** Vitest 4, React Testing Library, jsdom
 - **Protocol:** Model Context Protocol (MCP)
