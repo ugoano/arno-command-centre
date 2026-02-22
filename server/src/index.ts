@@ -4,19 +4,66 @@ import { z } from "zod";
 // --- MCP API helpers ---
 const TRELLO_MCP = process.env.TRELLO_MCP_URL || "http://134.209.178.194:8001";
 const GCAL_MCP = process.env.GCAL_MCP_URL || "http://134.209.178.194:8006";
-const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
+const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "5s1Z7_D-3bysrG8-8em6JX_VWAKpcKFrAU-9U8w5llM";
+
+// Session cache for backend MCP servers (streamable-http requires session IDs)
+const mcpSessions = new Map<string, string>();
+
+function baseHeaders(): Record<string, string> {
+  const h: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Accept": "application/json, text/event-stream",
+  };
+  if (MCP_AUTH_TOKEN) h["Authorization"] = `Bearer ${MCP_AUTH_TOKEN}`;
+  return h;
+}
+
+function parseSSE(raw: string) {
+  const dataLine = raw.split("\n").find((l: string) => l.startsWith("data:"));
+  if (!dataLine) throw new Error("No data in SSE response");
+  return JSON.parse(dataLine.slice(5).trim());
+}
+
+async function parseResponse(res: Response) {
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("text/event-stream") ? parseSSE(await res.text()) : await res.json();
+}
+
+async function getMcpSession(baseUrl: string): Promise<string> {
+  const cached = mcpSessions.get(baseUrl);
+  if (cached) return cached;
+
+  // Initialize session
+  const res = await fetch(`${baseUrl}/mcp`, {
+    method: "POST",
+    headers: baseHeaders(),
+    body: JSON.stringify({
+      jsonrpc: "2.0", id: 0, method: "initialize",
+      params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "arno-command-centre", version: "0.1.0" } },
+    }),
+  });
+
+  const sessionId = res.headers.get("mcp-session-id") || "";
+  if (!sessionId) throw new Error(`No session ID from ${baseUrl}`);
+
+  // Send initialized notification
+  await fetch(`${baseUrl}/mcp`, {
+    method: "POST",
+    headers: { ...baseHeaders(), "Mcp-Session-Id": sessionId },
+    body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+  });
+
+  mcpSessions.set(baseUrl, sessionId);
+  return sessionId;
+}
 
 async function callMcp(
   baseUrl: string,
   tool: string,
   args: Record<string, unknown>
 ) {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (MCP_AUTH_TOKEN) {
-    headers["Authorization"] = `Bearer ${MCP_AUTH_TOKEN}`;
-  }
+  const sessionId = await getMcpSession(baseUrl);
+  const headers = { ...baseHeaders(), "Mcp-Session-Id": sessionId };
 
   const res = await fetch(`${baseUrl}/mcp`, {
     method: "POST",
@@ -28,7 +75,26 @@ async function callMcp(
       params: { name: tool, arguments: args },
     }),
   });
-  const data = await res.json();
+
+  // If session expired, retry with a fresh one
+  if (res.status === 400 || res.status === 404) {
+    mcpSessions.delete(baseUrl);
+    const newSessionId = await getMcpSession(baseUrl);
+    const retry = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: { ...baseHeaders(), "Mcp-Session-Id": newSessionId },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: 1, method: "tools/call",
+        params: { name: tool, arguments: args },
+      }),
+    });
+    const data = await parseResponse(retry);
+    if (data.error) throw new Error(data.error.message);
+    const tc = data.result?.content?.find((c: { type: string }) => c.type === "text");
+    return tc ? JSON.parse(tc.text) : data.result;
+  }
+
+  const data = await parseResponse(res);
   if (data.error) throw new Error(data.error.message);
   // MCP tool results come as content array with text items
   const textContent = data.result?.content?.find(
