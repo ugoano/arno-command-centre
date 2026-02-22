@@ -5,6 +5,7 @@ import { generateSpeakSummary } from "./speak-summary.js";
 // --- MCP API helpers ---
 const TRELLO_MCP = process.env.TRELLO_MCP_URL || "http://134.209.178.194:8001";
 const GCAL_MCP = process.env.GCAL_MCP_URL || "http://134.209.178.194:8006";
+const WEATHER_MCP = process.env.WEATHER_MCP_URL || "http://134.209.178.194:8011";
 const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "5s1Z7_D-3bysrG8-8em6JX_VWAKpcKFrAU-9U8w5llM";
 
 // Session cache for backend MCP servers (streamable-http requires session IDs)
@@ -110,6 +111,14 @@ async function callTrello(tool: string, args: Record<string, unknown>) {
 
 async function callGcal(tool: string, args: Record<string, unknown>) {
   return callMcp(GCAL_MCP, tool, args);
+}
+
+async function callWeather(tool: string, args: Record<string, unknown>) {
+  return callMcp(WEATHER_MCP, tool, args);
+}
+
+async function getWeather(location: string = "London") {
+  return callWeather("get_weather", { location });
 }
 
 async function getTasks(list: string = "todo_today") {
@@ -509,6 +518,127 @@ const server = new McpServer(
     }
   )
 
+  // --- Widget: Daily Briefing ---
+  .registerWidget(
+    "show-daily-briefing",
+    {
+      description: "Arno Command Centre — Daily Briefing",
+    },
+    {
+      description:
+        "Display a unified daily briefing combining tasks, calendar events, and weather in one interactive view. Call this when the user wants a complete overview of their day, says 'brief me', 'daily briefing', or 'what does my day look like'.",
+      inputSchema: {
+        location: z
+          .string()
+          .optional()
+          .default("London")
+          .describe("City for weather (default: London)"),
+        taskLimit: z
+          .number()
+          .optional()
+          .default(5)
+          .describe("Max tasks to show (default: 5)"),
+      },
+      _meta: {
+        "openai/widgetAccessible": true,
+      },
+    },
+    async ({ location, taskLimit }) => {
+      try {
+        // Fetch all three data sources in parallel — the MCP gateway power move
+        const [cards, rawEvents, weather] = await Promise.all([
+          getTasks("todo_today"),
+          getEvents(1),
+          getWeather(location),
+        ]);
+
+        // Process tasks
+        const allTasks = (Array.isArray(cards) ? cards : []).map(
+          (card: {
+            id: string;
+            name: string;
+            desc: string;
+            due: string | null;
+            labels: Array<{ name: string; color: string }>;
+          }) => ({
+            id: card.id,
+            name: card.name,
+            due: card.due,
+            labels: card.labels?.map(
+              (l: { name: string; color: string }) => l.name
+            ) || [],
+          })
+        );
+        const overdueCount = allTasks.filter(
+          (t: { due: string | null }) => t.due && new Date(t.due) < new Date()
+        ).length;
+        const tasks = allTasks.slice(0, taskLimit);
+
+        // Process events
+        const events = (Array.isArray(rawEvents) ? rawEvents : []).map(
+          (evt: CalEvent) => ({
+            title: evt.summary || "Untitled",
+            start: evt.start || "",
+            end: evt.end || "",
+            location: evt.location || "",
+            isAllDay: typeof evt.start === "string" && !evt.start.includes("T"),
+          })
+        );
+
+        // Process weather
+        const weatherData = {
+          location: weather?.location || location,
+          temperature: weather?.current?.temperature || "N/A",
+          feelsLike: weather?.current?.feels_like || "N/A",
+          conditions: weather?.current?.conditions || "Unknown",
+          humidity: weather?.current?.humidity || "N/A",
+          wind: weather?.current?.wind_speed || "N/A",
+          forecast: weather?.forecast?.slice(0, 3)?.map(
+            (f: { date: string; high: string; low: string; conditions: string; precipitation_chance: string }) => ({
+              date: f.date,
+              high: f.high,
+              low: f.low,
+              conditions: f.conditions,
+              rain: f.precipitation_chance,
+            })
+          ) || [],
+        };
+
+        const structuredContent = {
+          tasks,
+          totalTasks: allTasks.length,
+          showingTasks: tasks.length,
+          overdueCount,
+          events,
+          totalEvents: events.length,
+          weather: weatherData,
+          timestamp: new Date().toISOString(),
+        };
+
+        return {
+          structuredContent,
+          content: [
+            {
+              type: "text" as const,
+              text: `Daily briefing: ${allTasks.length} tasks (${overdueCount} overdue), ${events.length} events, weather in ${weatherData.location}: ${weatherData.temperature} ${weatherData.conditions}. Top tasks: ${tasks.map((t: { name: string }) => t.name).join(", ")}`,
+            },
+          ],
+          isError: false,
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error fetching briefing: ${error}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+  )
+
   // --- Tool: Speak Summary ---
   .registerTool(
     "speak-summary",
@@ -533,7 +663,7 @@ const server = new McpServer(
           content: [
             {
               type: "text" as const,
-              text: `[SPEAK THIS ALOUD] ${summary}`,
+              text: summary,
             },
           ],
           isError: false,

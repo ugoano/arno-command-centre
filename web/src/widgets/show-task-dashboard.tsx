@@ -1,6 +1,6 @@
 import "@/index.css";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import {
   mountWidget,
   useDisplayMode,
@@ -22,11 +22,32 @@ function TaskDashboard() {
   const { callTool: doComplete, isPending: isCompleting } =
     useCallTool("complete-task");
   const { callTool: doAdd, isPending: isAdding } = useCallTool("add-task");
+  const { callToolAsync: doSpeak } = useCallTool("speak-summary");
   const sendMessage = useSendFollowUpMessage();
   const [displayMode] = useDisplayMode();
   const [newTask, setNewTask] = useState("");
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
   const [showAdd, setShowAdd] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  const handleSpeak = useCallback(async () => {
+    setIsSpeaking(true);
+    try {
+      const result = await doSpeak({ list: "todo_today" });
+      const text = result?.content?.find(
+        (c: { type: string }) => c.type === "text"
+      );
+      if (text && "text" in text) {
+        // Send the summary to Claude as a follow-up so it appears in conversation
+        // and the user can use Claude's native "read aloud" feature
+        sendMessage(`Here is my task summary: "${text.text}" — Please read this aloud.`);
+      }
+    } catch {
+      sendMessage("Use the speak-summary tool to summarise my tasks");
+    } finally {
+      setIsSpeaking(false);
+    }
+  }, [doSpeak, sendMessage]);
 
   if (!output) {
     return (
@@ -116,14 +137,11 @@ function TaskDashboard() {
         </button>
         <button
           className="btn btn-speak"
-          onClick={() =>
-            sendMessage(
-              `Use the speak-summary tool to get my task summary and speak the result aloud`
-            )
-          }
+          onClick={handleSpeak}
+          disabled={isSpeaking}
           data-llm="Request spoken summary button"
         >
-          🔊 Summary
+          {isSpeaking ? "🔊 ..." : "🔊 Summary"}
         </button>
         <button
           className="btn btn-refresh"

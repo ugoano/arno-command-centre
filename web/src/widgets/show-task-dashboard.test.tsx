@@ -12,12 +12,17 @@ vi.mock("skybridge/web", () => ({
 
 // --- Mock helpers ---
 const mockCallTool = vi.fn();
+const mockCallToolAsync = vi.fn().mockResolvedValue({
+  content: [{ type: "text", text: "You have 3 tasks today" }],
+  isError: false,
+});
 let mockOutput: unknown = null;
 
 vi.mock("../helpers.js", () => ({
   useToolInfo: () => ({ output: mockOutput }),
   useCallTool: () => ({
     callTool: mockCallTool,
+    callToolAsync: mockCallToolAsync,
     isPending: false,
   }),
 }));
@@ -63,6 +68,11 @@ describe("TaskDashboard widget", () => {
   beforeEach(() => {
     mockOutput = null;
     mockCallTool.mockReset();
+    mockCallToolAsync.mockReset();
+    mockCallToolAsync.mockResolvedValue({
+      content: [{ type: "text", text: "You have 3 tasks today" }],
+      isError: false,
+    });
     mockSendMessage.mockReset();
   });
 
@@ -162,16 +172,15 @@ describe("TaskDashboard widget", () => {
     ).toBeInTheDocument();
   });
 
-  it("sends follow-up message for speak summary", () => {
+  it("calls speak-summary tool when summary button clicked", () => {
     mockOutput = sampleOutput;
     render(<TaskDashboard />);
 
     const speakBtn = screen.getByText(/Summary/);
     fireEvent.click(speakBtn);
 
-    expect(mockSendMessage).toHaveBeenCalledWith(
-      expect.stringContaining("speak-summary")
-    );
+    // Should call the speak-summary tool via callToolAsync
+    expect(mockCallToolAsync).toHaveBeenCalledWith({ list: "todo_today" });
   });
 
   it("sends refresh message when refresh button clicked", () => {
